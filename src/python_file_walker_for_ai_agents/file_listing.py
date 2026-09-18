@@ -5,8 +5,8 @@ No recursion, sorting, content reads, or temporary files. Symlinks are not
 followed when classifying entries. The directory argument itself may be a
 symlink. Output order is the filesystem's order, not a snapshot.
 
-Successful data output is one ASCII JSON array, or one integer with -n.
-On failure, discard stdout: a streamed array may be incomplete.
+Successful data output is one ASCII JSON object with files, complete and errors.
+On failure, discard stdout: a streamed object may be incomplete.
 """
 
 import errno
@@ -18,43 +18,36 @@ import sys
 BATCH_SIZE = 4096
 # Metadata objects are larger than names: keep a smaller bounded batch.
 METADATA_BATCH_SIZE = 512
+MINIMUM_PYTHON = (3, 5)
 # Internal bit flags; --stats includes permissions and inode automatically.
 INODE = 1
 PERMISSIONS = 2
 STATS = 4
 FD_SCANDIR = os.scandir in getattr(os, "supports_fd", ()) if hasattr(os, "scandir") else False
-
-HELP = """Usage: list_files_in_a_directory_to_json.py [OPTIONS] DIRECTORY
-
-List regular-file basenames, including hidden files, as a JSON array.
-Exclude directories, symlinks, sockets, FIFOs and devices. Never recurse.
-
-  -n, --number       Output a JSON integer instead of filenames.
-      --all-entries  Include every entry except . and ..; skip type filtering.
-                     With no metadata or only --inode, no per-entry stat calls.
-      --inode        Output objects with name and directory-entry inode.
-      --permissions  Output name, mode, octal permissions, numeric uid and gid.
-                     Requires metadata; may be combined with --inode.
-      --stats        Output the above plus inode, device, type, nlink, size,
-                     integer ns timestamps, blocks_512, blksize and rdev.
-                     Aliases: --file-permissions-stats, --file_permissions_stats.
-      --base64       Encode each raw filename as a base64 ASCII string.
-  -h, --help         Show this help on stderr; no JSON is produced.
-      --            End options (for a directory name beginning with '-').
-
-Exactly one directory is required. Options may appear before or after it.
---number cannot be combined with --inode, --permissions, or --stats.
---stats includes --permissions and --inode; combined flags cause no extra stat.
-Permissions are mode bits, NOT an ACL or effective-access test. No name lookups.
-Symlinks are never followed for metadata (also with --all-entries).
-Metadata uses one cached stat result per entry; it is NOT a directory snapshot.
-Default names use filesystem decoding and JSON ASCII escaping. JSON integers
-are exact; consumers must preserve large integers (especially ns timestamps).
-Python 3.7+ attempts O_NOATIME; 3.5/3.6 uses path-based scandir without it.
-
-Exit: 0 success/help; 1 I/O/runtime failure; 2 usage/unsupported platform;
-      130 interrupted; 141 broken output pipe. Discard stdout on any failure.
-"""
+HELP_FLAGS = frozenset(("-h", "--help", "-help"))
+HELP_DOCUMENT = {
+    "usage": "list_files_in_a_directory_to_json.py [OPTIONS] DIRECTORY",
+    "does": "Emits entries from one Linux directory without recursion or sorting; default emits regular-file basenames including hidden files and excludes directories, symlinks, and special files.",
+    "envelope": {"files": "object", "complete": "boolean", "errors": "integer"},
+    "returns": {
+        "default": {"field": "files.entries", "type": "array", "items": "string"},
+        "--number": {"field": "files.count", "type": "integer"},
+        "--inode": {"field": "files.entries", "type": "array", "items": {"name": "string", "inode": "integer"}},
+        "--permissions": {"field": "files.entries", "type": "array", "items": {"name": "string", "mode": "integer", "permissions": "octal string", "uid": "integer", "gid": "integer"}},
+        "--stats": {"field": "files.entries", "type": "array", "items": {"name": "string", "mode": "integer", "permissions": "octal string", "uid": "integer", "gid": "integer", "inode": "integer", "device": "integer", "type": "string", "nlink": "integer", "size": "integer", "atime_ns": "integer", "mtime_ns": "integer", "ctime_ns": "integer", "blocks_512": "integer|null", "blksize": "integer|null", "rdev": "integer|null"}},
+    },
+    "options": {
+        "--all-entries": "include all entry types; never follow symlinks",
+        "--base64": "encode raw filename bytes as base64 in name fields",
+        "--inode": "add directory-entry inode; no stat with --all-entries",
+        "--permissions": "add mode, permission bits, uid, and gid",
+        "--stats": "include permissions, inode, and full stat fields",
+        "--number": "return a count; incompatible with metadata options",
+    },
+    "aliases": {"-n": "--number", "--file-permissions-stats": "--stats", "--file_permissions_stats": "--stats"},
+    "help": ["-h", "--help", "-help"],
+    "option_terminator": "--",
+}
 
 
 class UsageError(Exception):
@@ -84,6 +77,13 @@ def diagnostic(message):
         pass
 
 
+def help_json(error=None):
+    import json
+    document = HELP_DOCUMENT if error is None else {
+        "error": error, "help": HELP_DOCUMENT}
+    return json.dumps(document, ensure_ascii=True, separators=(",", ":"))
+
+
 def parse_args(args):
     # Avoid argparse's import tree for this small, fixed CLI (not a pip module).
     directory = None
@@ -95,7 +95,7 @@ def parse_args(args):
     for arg in args:
         if options and arg == "--":
             options = False
-        elif options and arg in ("-h", "--help"):
+        elif options and arg in HELP_FLAGS:
             return None
         elif options and arg in ("-n", "--number"):
             number = True
@@ -182,7 +182,7 @@ def write_listing(entries, all_entries=False, base64_names=False, fd=1):
         write_all(fd, payload)
         prefix = ","
     # Do not write the final bracket on an enumeration or encoding failure.
-    write_all(fd, b"[]\n" if prefix == "[" else b"]\n")
+    write_all(fd, b"[]" if prefix == "[" else b"]")
 
 
 def metadata_records(entries, metadata, all_entries=False, base64_names=False):
@@ -269,7 +269,46 @@ def write_metadata(entries, metadata, all_entries=False, base64_names=False, fd=
             break
         write_all(fd, (prefix + encode(batch)[1:-1]).encode("ascii"))
         prefix = ","
-    write_all(fd, b"[]\n" if prefix == "[" else b"]\n")
+    write_all(fd, b"[]" if prefix == "[" else b"]")
+
+
+def files_context(metadata, all_entries, base64_names):
+    if metadata & STATS:
+        mode = "stats"
+    elif metadata & PERMISSIONS:
+        mode = "permissions+inode" if metadata & INODE else "permissions"
+    elif metadata & INODE:
+        mode = "inode"
+    else:
+        mode = "names"
+    return {
+        "mode": mode,
+        "scope": "all-entries" if all_entries else "regular-files",
+        "name_encoding": "base64" if base64_names else "filesystem-text",
+    }
+
+
+def write_entries_prefix(metadata, all_entries, base64_names, fd=1):
+    import json
+    context = files_context(metadata, all_entries, base64_names)
+    encoded = json.dumps(context, ensure_ascii=True,
+                         separators=(",", ":")).encode("ascii")
+    write_all(fd, b'{"files":' + encoded[:-1] + b',"entries":')
+
+
+def write_count(count, all_entries, fd=1):
+    import json
+    document = {
+        "files": {
+            "mode": "count",
+            "scope": "all-entries" if all_entries else "regular-files",
+            "count": count,
+        },
+        "complete": True,
+        "errors": 0,
+    }
+    write_all(fd, (json.dumps(document, ensure_ascii=True,
+                              separators=(",", ":")) + "\n").encode("ascii"))
 
 
 def run(directory, number=False, all_entries=False, base64_names=False, metadata=0):
@@ -281,10 +320,12 @@ def run(directory, number=False, all_entries=False, base64_names=False, metadata
     try:
         if number:
             count = count_entries(entries, all_entries)
-        elif metadata:
-            write_metadata(entries, metadata, all_entries, base64_names)
         else:
-            write_listing(entries, all_entries, base64_names)
+            write_entries_prefix(metadata, all_entries, base64_names)
+            if metadata:
+                write_metadata(entries, metadata, all_entries, base64_names)
+            else:
+                write_listing(entries, all_entries, base64_names)
     finally:
         # close() was added in 3.6. On CPython 3.5 exhaustion/destruction closes
         # the iterator; this function does not retain it after returning.
@@ -297,21 +338,29 @@ def run(directory, number=False, all_entries=False, base64_names=False, metadata
                 os.close(directory_fd)
     if number:
         # No result is emitted before the complete count and cleanup succeed.
-        write_all(1, (str(count) + "\n").encode("ascii"))
+        write_count(count, all_entries)
+    else:
+        # The success envelope is completed only after enumeration and cleanup.
+        write_all(1, b'},"complete":true,"errors":0}\n')
 
 
 def main(argv=None):
     try:
-        if not sys.platform.startswith("linux") or not hasattr(os, "scandir"):
+        if (not sys.platform.startswith("linux") or
+                sys.version_info < MINIMUM_PYTHON or not hasattr(os, "scandir")):
             raise UsageError("Linux and Python 3.5 or newer are required")
-        args = parse_args(sys.argv[1:] if argv is None else argv)
+        raw_args = sys.argv[1:] if argv is None else argv
+        if not raw_args:
+            diagnostic(help_json())
+            return 2
+        args = parse_args(raw_args)
         if args is None:
-            diagnostic(HELP.rstrip())
+            diagnostic(help_json())
             return 0
         run(*args)
         return 0
     except UsageError as exc:
-        diagnostic("error: " + str(exc) + "\nUse --help for usage.")
+        diagnostic(help_json(str(exc)))
         return 2
     except BrokenPipeError:
         diagnostic("error: broken output pipe")
