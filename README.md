@@ -1,47 +1,67 @@
 # PYTHON_FILE_WALKER_FOR_AI_AGENTS
 
-Python file traversal tooling for AI agents.
+Linux directory-tree JSON streamer for AI-agent tooling.
 
-**Development mode: EXP** — rapid, evidence-led experimentation; make small
-changes, run representative cases, and adapt to observed behavior.
+```text
+mode: EXP
+python: >=3.12
+runtime_dependencies: []
+platform: Linux
+implementation: src/python_file_walker_for_ai_agents/directory_tree.py
+shim: python_file_walker_for_ai_agents.py
+```
 
-**State:** initialized Python 3.12 project with the Modular Vertical Architecture
-(MVA) v0.3.0 baseline. An imported Linux directory-tree implementation and its
-native test suite, benchmarks, recorded results, and checksum manifest live under
-[`experiments/dtree/`](experiments/dtree/README.md) for evaluation. The installed
-command still prints a starter greeting; the candidate has not yet been promoted
-into the package's public CLI.
+## Contract
 
-## Run the scaffold
+- Input: exactly one directory location.
+- Hidden directories: included.
+- Ordering: sorted using `LC_COLLATE`; byte order in C/POSIX locales.
+- Directory symlinks: emitted as leaf nodes; never traversed.
+- Other symlinks and non-directories: omitted.
+- Filesystem boundary: directories with a different `st_dev` are emitted as
+  pruned leaves and not enumerated.
+- Output: one compact JSON document plus newline on stdout.
+- Runtime: Python standard library only; no external filesystem walker.
+
+## Run
+
+```bash
+./python_file_walker_for_ai_agents.py LOCATION
+uv run --locked python-file-walker-for-ai-agents LOCATION
+```
+
+`-h`, `--help`, `-help`, or no location emits the compact JSON contract to
+stderr. Explicit help exits `0`; a missing or invalid argument count exits `2`.
+
+The executable shim works from any current directory. A symlink resolves the
+adjacent source package. A copied shim, including one placed in `/usr/local/bin`,
+imports `python_file_walker_for_ai_agents` from the Python interpreter selected
+by `/usr/bin/env python3`; install the package into that interpreter first.
+
+## Output
+
+```json
+{"tree":{"type":"directory","name":"LOCATION","children":[{"type":"directory","name":"NAME","children":[]},{"type":"link","name":"NAME","target":"TARGET"}]},"complete":true,"errors":0}
+```
+
+Invalid filename bytes add authoritative `name_bytes_b64` or
+`target_bytes_b64`. Failed directory nodes add `error`. Cross-filesystem nodes
+add `"pruned":"different-filesystem"`.
+
+| Exit | Meaning |
+| ---: | --- |
+| 0 | Complete selected traversal and successful output flush. |
+| 1 | Partial traversal, root failure, output failure, or memory failure. |
+| 2 | Invalid invocation or unsupported runtime. |
+| 130 | Interrupted. |
+| 141 | Broken pipe. |
+
+## Verify
 
 ```bash
 uv sync --locked
-uv run --locked python-file-walker-for-ai-agents
+uv run --locked python -m unittest -q tests/test_relocatable_shim.py
+(cd experiments/dtree && uv run --locked python -m unittest -q test_directory_tree.py)
 ```
 
-The package lives in `src/python_file_walker_for_ai_agents/`.
-
-## Candidate implementation
-
-The `experiments/dtree/` bundle retains its imported layout so its `SHA256SUMS`
-file and reproduction commands remain useful. It targets Linux, invokes no
-external filesystem walker, uses only the Python standard library at runtime,
-and emits a streamed directory-only JSON tree. Hidden directories are always
-included, children are sorted, directory symlinks are leaves, and traversal
-stays on the root filesystem. See the experiment's
-[README](experiments/dtree/README.md) and
-[benchmark report](experiments/dtree/BENCHMARK_REPORT.md).
-
-## Architecture
-
-Start with [ARCHITECTURE.md](ARCHITECTURE.md) and
-[AGENTS.md](AGENTS.md). Validate the architecture baseline with:
-
-```bash
-uvx --from "git+https://github.com/squizzster/MODULAR_VERTICAL_ARCHITECTURE-MODULAR_VERTICAL_ARCHITECTURE.git@v0.3.0" mva validate .
-```
-
-The starter architecture catalogue has no application modules or features yet.
-Validation checks the declared artifacts; it does not verify file traversal.
-
-Keep temporary work in ignored `.tmp.*` directories within this project.
+Benchmark and low-level verification assets are in `experiments/dtree/`.

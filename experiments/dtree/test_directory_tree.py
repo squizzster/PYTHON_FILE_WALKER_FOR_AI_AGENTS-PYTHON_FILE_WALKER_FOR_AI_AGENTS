@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Run: python3 -m unittest -v test_directory_tree
 
-Only temporary test fixtures are changed. Linux; tests use Python 3.5 syntax.
+Only temporary test fixtures are changed. Linux and Python 3.12+.
 Optional LD_PRELOAD helper is built separately for the DT_UNKNOWN tests.
 """
-import ast
 import base64
 import errno
 import io
@@ -31,7 +30,6 @@ sys.path.insert(0, SOURCE_ROOT)
 from python_file_walker_for_ai_agents import directory_tree as dt
 
 SCRIPT = os.path.join(PROJECT_ROOT, "python_file_walker_for_ai_agents.py")
-IMPLEMENTATION = os.path.abspath(dt.__file__)
 
 
 def names(node):
@@ -714,15 +712,6 @@ class Fixture(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn(b"out of memory", result.stderr)
         self.assertNotIn(b"Traceback", result.stderr)
-
-    def test_python35_grammar(self):
-        with open(IMPLEMENTATION, "r") as src:
-            text = src.read()
-        if sys.version_info >= (3, 8):
-            ast.parse(text, feature_version=(3, 5))
-        else:
-            ast.parse(text)
-
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

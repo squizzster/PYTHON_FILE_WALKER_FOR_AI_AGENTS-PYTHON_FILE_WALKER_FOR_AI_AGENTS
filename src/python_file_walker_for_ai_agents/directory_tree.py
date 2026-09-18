@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Directory-only JSON tree for Linux, CPython 3.5+.
+"""Directory-only JSON tree for Linux, Python 3.12+.
 
 Usage: python_file_walker_for_ai_agents.py LOCATION
 
@@ -96,9 +96,9 @@ class Frame(object):
 
 
 class DirectoryTree(object):
-    """Single-threaded scanner. On 3.5/3.6 it temporarily changes process cwd.
+    """Single-threaded scanner. The path backend temporarily changes cwd.
 
-    Do not call the legacy backend concurrently with other filesystem work in
+    Do not call the path backend concurrently with other filesystem work in
     the same process. The command-line program never creates threads.
     """
     def __init__(self, output, errors, native_scandir=None):
@@ -185,7 +185,7 @@ class DirectoryTree(object):
                 close = getattr(iterator, "close", None)
                 if close is not None:
                     close()
-                # CPython 3.5 has no public close(); destruction closes it.
+                # Destruction is an additional close safeguard.
                 del iterator
         if self.byte_sort:
             pending.sort(key=lambda item: os.fsencode(item[0]), reverse=True)
@@ -305,8 +305,8 @@ def main(argv=None):
         sys.stderr.write(json.dumps(HELP_DOCUMENT, ensure_ascii=True,
                                     separators=(",", ":")) + "\n")
         return 2
-    if not sys.platform.startswith("linux") or sys.version_info < (3, 5):
-        sys.stderr.write("dtree: requires Linux and CPython/Python 3.5 or newer\n")
+    if not sys.platform.startswith("linux") or sys.version_info < (3, 12):
+        sys.stderr.write("dtree: requires Linux and Python 3.12 or newer\n")
         return 2
     try:
         locale.setlocale(locale.LC_COLLATE, "")
