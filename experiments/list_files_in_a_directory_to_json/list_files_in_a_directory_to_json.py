@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""List regular-file names in one Linux directory as JSON. Python >= 3.5.
+"""List names or optional metadata in one Linux directory as JSON. Python >= 3.5.
 
 No recursion, sorting, content reads, or temporary files. Symlinks are not
 followed when classifying entries. The directory argument itself may be a
@@ -16,6 +16,12 @@ import sys
 # Limits the number of names retained, not the directory size. JSON encoding
 # works on whole batches (using CPython's accelerator when available).
 BATCH_SIZE = 4096
+# Metadata objects are larger than names: keep a smaller bounded batch.
+METADATA_BATCH_SIZE = 512
+# Internal bit flags; --stats includes permissions and inode automatically.
+INODE = 1
+PERMISSIONS = 2
+STATS = 4
 FD_SCANDIR = os.scandir in getattr(os, "supports_fd", ()) if hasattr(os, "scandir") else False
 
 HELP = """Usage: list_files_in_a_directory_to_json.py [OPTIONS] DIRECTORY
@@ -24,17 +30,27 @@ List regular-file basenames, including hidden files, as a JSON array.
 Exclude directories, symlinks, sockets, FIFOs and devices. Never recurse.
 
   -n, --number       Output a JSON integer instead of filenames.
-      --all-entries  Include every directory entry except . and ..;
-                     do not request per-entry file-type metadata.
+      --all-entries  Include every entry except . and ..; skip type filtering.
+                     With no metadata or only --inode, no per-entry stat calls.
+      --inode        Output objects with name and directory-entry inode.
+      --permissions  Output name, mode, octal permissions, numeric uid and gid.
+                     Requires metadata; may be combined with --inode.
+      --stats        Output the above plus inode, device, type, nlink, size,
+                     integer ns timestamps, blocks_512, blksize and rdev.
+                     Aliases: --file-permissions-stats, --file_permissions_stats.
       --base64       Encode each raw filename as a base64 ASCII string.
-                     Useful for arbitrary bytes and non-Python JSON readers.
   -h, --help         Show this help on stderr; no JSON is produced.
       --            End options (for a directory name beginning with '-').
 
-Options may appear before or after DIRECTORY. Exactly one directory is required.
-Default names use Python's filesystem decoding and JSON ASCII escaping.
-Python 3.7+ attempts O_NOATIME, falling back if unavailable/not permitted.
-Python 3.5/3.6 uses path-based scandir, without O_NOATIME.
+Exactly one directory is required. Options may appear before or after it.
+--number cannot be combined with --inode, --permissions, or --stats.
+--stats includes --permissions and --inode; combined flags cause no extra stat.
+Permissions are mode bits, NOT an ACL or effective-access test. No name lookups.
+Symlinks are never followed for metadata (also with --all-entries).
+Metadata uses one cached stat result per entry; it is NOT a directory snapshot.
+Default names use filesystem decoding and JSON ASCII escaping. JSON integers
+are exact; consumers must preserve large integers (especially ns timestamps).
+Python 3.7+ attempts O_NOATIME; 3.5/3.6 uses path-based scandir without it.
 
 Exit: 0 success/help; 1 I/O/runtime failure; 2 usage/unsupported platform;
       130 interrupted; 141 broken output pipe. Discard stdout on any failure.
@@ -74,6 +90,7 @@ def parse_args(args):
     number = False
     all_entries = False
     base64_names = False
+    metadata = 0
     options = True
     for arg in args:
         if options and arg == "--":
@@ -84,6 +101,13 @@ def parse_args(args):
             number = True
         elif options and arg == "--all-entries":
             all_entries = True
+        elif options and arg == "--inode":
+            metadata |= INODE
+        elif options and arg == "--permissions":
+            metadata |= PERMISSIONS
+        elif options and arg in ("--stats", "--file-permissions-stats",
+                                 "--file_permissions_stats"):
+            metadata |= INODE | PERMISSIONS | STATS
         elif options and arg == "--base64":
             base64_names = True
         elif options and arg.startswith("-") and arg != "-":
@@ -94,7 +118,9 @@ def parse_args(args):
             raise UsageError("exactly one directory is required")
     if directory is None:
         raise UsageError("a directory argument is required")
-    return directory, number, all_entries, base64_names
+    if number and metadata:
+        raise UsageError("--number cannot be combined with metadata options")
+    return directory, number, all_entries, base64_names, metadata
 
 
 def open_scan(directory):
@@ -159,11 +185,104 @@ def write_listing(entries, all_entries=False, base64_names=False, fd=1):
     write_all(fd, b"[]\n" if prefix == "[" else b"]\n")
 
 
-def run(directory, number=False, all_entries=False, base64_names=False):
+def metadata_records(entries, metadata, all_entries=False, base64_names=False):
+    """Yield small dictionaries; no content reads or ownership-name lookups.
+
+    inode-only uses dirent.d_ino. When stat is requested, inode comes from the
+    same stat_result as all other metadata, never a potentially stale d_ino.
+    """
+    if base64_names:
+        import base64
+        def encode_name(name):
+            return base64.b64encode(os.fsencode(name)).decode("ascii")
+    else:
+        encode_name = None
+
+    # Inode-only: no stat() calls here. Regular-file filtering can still need
+    # a fallback lookup on DT_UNKNOWN; --all-entries avoids that too.
+    if not metadata & (PERMISSIONS | STATS):
+        for entry in entries:
+            if not all_entries and not entry.is_file(follow_symlinks=False):
+                continue
+            name = entry.name
+            if encode_name is not None:
+                name = encode_name(name)
+            yield {"name": name, "inode": entry.inode()}
+        return
+
+    import stat
+    is_regular = stat.S_ISREG
+    include_inode = bool(metadata & (INODE | STATS))
+    full_stats = bool(metadata & STATS)
+    if full_stats:
+        file_type = stat.S_IFMT
+        type_names = {
+            stat.S_IFREG: "file", stat.S_IFDIR: "directory",
+            stat.S_IFLNK: "symlink", stat.S_IFIFO: "fifo",
+            stat.S_IFSOCK: "socket", stat.S_IFCHR: "character",
+            stat.S_IFBLK: "block",
+        }
+
+    for entry in entries:
+        # This skips known non-files without statting them. If DT_UNKNOWN
+        # caused is_file() to stat already, the next call reuses its cache.
+        if not all_entries and not entry.is_file(follow_symlinks=False):
+            continue
+        info = entry.stat(follow_symlinks=False)
+        mode = info.st_mode
+        # is_file() can reflect an older directory entry. A replacement must
+        # not make a symlink/directory record leak into regular-file mode.
+        if not all_entries and not is_regular(mode):
+            continue
+        name = entry.name
+        if encode_name is not None:
+            name = encode_name(name)
+        record = {"name": name, "mode": mode, "permissions": "%04o" % (mode & 0o7777),
+                  "uid": info.st_uid, "gid": info.st_gid}
+        if include_inode:
+            record["inode"] = info.st_ino
+        if full_stats:
+            record.update(
+                device=info.st_dev, type=type_names.get(file_type(mode), "unknown"),
+                nlink=info.st_nlink, size=info.st_size,
+                atime_ns=info.st_atime_ns, mtime_ns=info.st_mtime_ns,
+                ctime_ns=info.st_ctime_ns,
+                # Linux normally exposes all three. A Python build missing an
+                # optional member yields null, never an invented zero.
+                blocks_512=getattr(info, "st_blocks", None),
+                blksize=getattr(info, "st_blksize", None),
+                rdev=getattr(info, "st_rdev", None))
+        yield record
+
+
+def write_metadata(entries, metadata, all_entries=False, base64_names=False, fd=1):
+    """Separate bounded serializer: the original name-only path stays unchanged."""
+    import itertools
+    import json
+
+    encode = json.JSONEncoder(ensure_ascii=True, separators=(",", ":")).encode
+    records = metadata_records(entries, metadata, all_entries, base64_names)
+    prefix = "["
+    while True:
+        batch = list(itertools.islice(records, METADATA_BATCH_SIZE))
+        if not batch:
+            break
+        write_all(fd, (prefix + encode(batch)[1:-1]).encode("ascii"))
+        prefix = ","
+    write_all(fd, b"[]\n" if prefix == "[" else b"]\n")
+
+
+def run(directory, number=False, all_entries=False, base64_names=False, metadata=0):
+    if metadata < 0 or metadata & ~(INODE | PERMISSIONS | STATS):
+        raise UsageError("invalid metadata flags")
+    if number and metadata:
+        raise UsageError("--number cannot be combined with metadata options")
     entries, directory_fd = open_scan(directory)
     try:
         if number:
             count = count_entries(entries, all_entries)
+        elif metadata:
+            write_metadata(entries, metadata, all_entries, base64_names)
         else:
             write_listing(entries, all_entries, base64_names)
     finally:
