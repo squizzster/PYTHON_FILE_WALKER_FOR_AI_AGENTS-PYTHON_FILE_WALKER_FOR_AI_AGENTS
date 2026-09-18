@@ -24,7 +24,11 @@ import sys
 import tempfile
 import time
 
-import create_directory_tree_to_json as dt
+HERE = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
+sys.path.insert(0, os.path.join(PROJECT_ROOT, "src"))
+
+from python_file_walker_for_ai_agents import directory_tree as dt
 
 SCRIPT = os.path.abspath(__file__)
 ENGINES = ("dtree", "listdir-lstat", "os-walk")

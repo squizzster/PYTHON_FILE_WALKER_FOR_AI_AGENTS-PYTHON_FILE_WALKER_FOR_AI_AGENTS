@@ -10,7 +10,7 @@ requires-python = ">=3.12"
 dependencies = []
 
 [project.scripts]
-python-file-walker-for-ai-agents = "python_file_walker_for_ai_agents:main"
+python-file-walker-for-ai-agents = "python_file_walker_for_ai_agents.directory_tree:cli"
 
 [build-system]
 requires = ["uv_build>=0.12.1,<0.13.0"]
