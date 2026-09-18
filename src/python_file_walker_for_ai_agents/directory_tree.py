@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Directory-only JSON tree for Linux, Python 3.12+.
+"""Directory-only JSON tree for Linux, Python 3.5+.
 
 Usage: python_file_walker_for_ai_agents.py LOCATION
 
@@ -20,6 +20,7 @@ from json.encoder import encode_basestring_ascii as quote
 
 
 BUFFER_SIZE = 65536
+MINIMUM_PYTHON = (3, 5)
 _FD_SCANDIR = os.scandir in getattr(os, "supports_fd", ()) if hasattr(os, "scandir") else False
 _NOATIME_RETRY = frozenset((errno.EPERM, errno.EINVAL,
                             getattr(errno, "EOPNOTSUPP", errno.EINVAL)))
@@ -185,7 +186,7 @@ class DirectoryTree(object):
                 close = getattr(iterator, "close", None)
                 if close is not None:
                     close()
-                # Destruction is an additional close safeguard.
+                # Python 3.5 has no public close(); destruction closes it.
                 del iterator
         if self.byte_sort:
             pending.sort(key=lambda item: os.fsencode(item[0]), reverse=True)
@@ -305,8 +306,9 @@ def main(argv=None):
         sys.stderr.write(json.dumps(HELP_DOCUMENT, ensure_ascii=True,
                                     separators=(",", ":")) + "\n")
         return 2
-    if not sys.platform.startswith("linux") or sys.version_info < (3, 12):
-        sys.stderr.write("dtree: requires Linux and Python 3.12 or newer\n")
+    if not sys.platform.startswith("linux") or sys.version_info < MINIMUM_PYTHON:
+        sys.stderr.write("dtree: requires Linux and Python %d.%d or newer\n" %
+                         MINIMUM_PYTHON)
         return 2
     try:
         locale.setlocale(locale.LC_COLLATE, "")
