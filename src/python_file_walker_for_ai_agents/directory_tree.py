@@ -18,12 +18,11 @@ import os
 import sys
 from json.encoder import encode_basestring_ascii as quote
 
+from .filesystem import FD_SCANDIR, MINIMUM_PYTHON, open_directory
+
 
 BUFFER_SIZE = 65536
-MINIMUM_PYTHON = (3, 5)
-_FD_SCANDIR = os.scandir in getattr(os, "supports_fd", ()) if hasattr(os, "scandir") else False
-_NOATIME_RETRY = frozenset((errno.EPERM, errno.EINVAL,
-                            getattr(errno, "EOPNOTSUPP", errno.EINVAL)))
+_FD_SCANDIR = FD_SCANDIR
 _BROKEN_LINK = frozenset((errno.ENOENT, errno.ENOTDIR, errno.ELOOP))
 HELP_FLAGS = frozenset(("-h", "--help", "-help"))
 HELP_DOCUMENT = {
@@ -102,20 +101,19 @@ class DirectoryTree(object):
     Do not call the path backend concurrently with other filesystem work in
     the same process. The command-line program never creates threads.
     """
-    def __init__(self, output, errors, native_scandir=None):
+    def __init__(self, output, errors, native_scandir=None,
+                 file_writer_factory=None):
         self.out = BufferedJSON(output)
         self.stderr = errors
         self.native = _FD_SCANDIR if native_scandir is None else native_scandir
+        self.file_writer_factory = file_writer_factory
+        self.file_writer = None
         self.error_count = 0
         self.stack = []
         self.active = set()
         self.root_device = None
         self.saved_cwd = None
         self.root_name = None
-        self.flags = os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_CLOEXEC", 0)
-        # scandir(fd) uses the same open file description, preserving NOATIME.
-        # The legacy path backend opens another description, so cannot do this.
-        self.noatime = getattr(os, "O_NOATIME", 0) if self.native else 0
         collation = locale.setlocale(locale.LC_COLLATE)
         self.byte_sort = collation in ("C", "POSIX", "C.UTF-8", "C.utf8")
 
@@ -138,18 +136,26 @@ class DirectoryTree(object):
                 "message": str(exc).encode("utf-8", "backslashreplace").decode("utf-8")}
 
     def open_dir(self, name, parent_fd=None):
-        flags = self.flags
-        if parent_fd is not None:
-            flags |= os.O_NOFOLLOW
-        if self.noatime:
-            try:
-                return os.open(name, flags | self.noatime, dir_fd=parent_fd)
-            except OSError as exc:
-                if exc.errno not in _NOATIME_RETRY:
-                    raise
-                # Ownership/FS support varies by directory: don't disable the
-                # attempt globally. Failed opens do not enumerate anything.
-        return os.open(name, flags, dir_fd=parent_fd)
+        # scandir(fd) shares this open description, preserving O_NOATIME. The
+        # legacy path backend opens another description, so does not request it.
+        return open_directory(
+            name,
+            parent_fd=parent_fd,
+            nofollow=parent_fd is not None,
+            noatime=self.native,
+        )
+
+    def write_file_bytes(self, data):
+        self.out.write(data.decode("ascii"))
+
+    def begin_files(self):
+        self.out.write(',"files":')
+        return self.file_writer_factory(self.write_file_bytes)
+
+    def write_empty_files(self):
+        if self.file_writer_factory is not None:
+            writer = self.begin_files()
+            writer.finish()
 
     def scan(self, fd, name):
         pending = []
@@ -162,6 +168,8 @@ class DirectoryTree(object):
                 os.fchdir(fd)
                 iterator = os.scandir(".")
             for entry in iterator:
+                if self.file_writer is not None:
+                    self.file_writer.add(entry)
                 try:
                     if entry.is_dir(follow_symlinks=False):
                         pending.append((entry.name, None))
@@ -205,8 +213,9 @@ class DirectoryTree(object):
             os.close(fd)
 
     def emit_failed(self, name, detail):
-        self.out.write('{"type":"directory",' + text_fields("name", name) +
-                       ',"children":[],"error":' +
+        self.out.write('{"type":"directory",' + text_fields("name", name))
+        self.write_empty_files()
+        self.out.write(',"children":[],"error":' +
                        json.dumps(detail, ensure_ascii=True, separators=(",", ":")) + '}')
 
     def enter(self, name, parent=None):
@@ -222,8 +231,9 @@ class DirectoryTree(object):
                 if self.root_device is None:
                     self.root_device = info.st_dev
                 elif info.st_dev != self.root_device:
-                    self.out.write('{"type":"directory",' + text_fields("name", name) +
-                                   ',"children":[],"pruned":"different-filesystem"}')
+                    self.out.write('{"type":"directory",' + text_fields("name", name))
+                    self.write_empty_files()
+                    self.out.write(',"children":[],"pruned":"different-filesystem"}')
                     return
             except OSError as exc:
                 detail = self.report("open directory", exc, None if parent is None else name)
@@ -237,10 +247,22 @@ class DirectoryTree(object):
             self.stack.append(frame)
             fd = None
             self.active.add(identity)
-            frame.pending, frame.errors = self.scan(frame.fd, name)
+            if self.file_writer_factory is not None:
+                self.out.write('{"type":"directory",' + text_fields("name", name))
+                writer = self.begin_files()
+                self.file_writer = writer
+                try:
+                    frame.pending, frame.errors = self.scan(frame.fd, name)
+                finally:
+                    self.file_writer = None
+                writer.finish()
+                self.out.write(',"children":[')
+            else:
+                frame.pending, frame.errors = self.scan(frame.fd, name)
+                self.out.write('{"type":"directory",' + text_fields("name", name) +
+                               ',"children":[')
             if not frame.pending:
                 self.close_frame_fd(frame)
-            self.out.write('{"type":"directory",' + text_fields("name", name) + ',"children":[')
         finally:
             if fd is not None:
                 os.close(fd)
