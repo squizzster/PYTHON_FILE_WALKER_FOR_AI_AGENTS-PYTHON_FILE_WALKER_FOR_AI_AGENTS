@@ -23,9 +23,15 @@ import time
 import unittest
 from unittest import mock
 
-import create_directory_tree_to_json as dt
+HERE = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
+SOURCE_ROOT = os.path.join(PROJECT_ROOT, "src")
+sys.path.insert(0, SOURCE_ROOT)
 
-SCRIPT = os.path.abspath(dt.__file__)
+from python_file_walker_for_ai_agents import directory_tree as dt
+
+SCRIPT = os.path.join(PROJECT_ROOT, "python_file_walker_for_ai_agents.py")
+IMPLEMENTATION = os.path.abspath(dt.__file__)
 
 
 def names(node):
@@ -230,7 +236,7 @@ class Fixture(unittest.TestCase):
             self.assertEqual(result.returncode, 2)
             self.assertEqual(result.stdout, b"")
             help_doc = json.loads(result.stderr)
-            self.assertEqual(help_doc["usage"], "create_directory_tree_to_json.py LOCATION")
+            self.assertEqual(help_doc["usage"], "python_file_walker_for_ai_agents.py LOCATION")
 
     def test_help(self):
         for flag in ("-h", "--help", "-help"):
@@ -238,7 +244,7 @@ class Fixture(unittest.TestCase):
             self.assertEqual(result.returncode, 0)
             self.assertEqual(result.stdout, b"")
             help_doc = json.loads(result.stderr)
-            self.assertEqual(help_doc["usage"], "create_directory_tree_to_json.py LOCATION")
+            self.assertEqual(help_doc["usage"], "python_file_walker_for_ai_agents.py LOCATION")
             self.assertEqual(set(help_doc["nodes"]), {"directory", "link"})
 
     def test_dash_location_needs_no_option_delimiter(self):
@@ -649,9 +655,9 @@ class Fixture(unittest.TestCase):
     def test_sigint_exit_code(self):
         # Force SIGINT during scan, not during Python's import machinery.
         program = ('import os,signal,sys; sys.path.insert(0,%r); '
-                   'import create_directory_tree_to_json as d; '
+                   'from python_file_walker_for_ai_agents import directory_tree as d; '
                    'd.DirectoryTree.scan=lambda *a: os.kill(os.getpid(), signal.SIGINT); '
-                   'sys.argv=[%r,%r]; sys.exit(d.cli())') % (os.path.dirname(SCRIPT), SCRIPT, self.temp)
+                   'sys.argv=[%r,%r]; sys.exit(d.cli())') % (SOURCE_ROOT, SCRIPT, self.temp)
         result = subprocess.run([sys.executable, "-c", program], stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE)
         self.assertEqual(result.returncode, 130)
@@ -698,11 +704,11 @@ class Fixture(unittest.TestCase):
 
     def test_memory_error_exit_code(self):
         program = ('import sys; sys.path.insert(0,%r); '
-                   'import create_directory_tree_to_json as d; '
+                   'from python_file_walker_for_ai_agents import directory_tree as d; '
                    'from unittest import mock; '
                    'sys.argv=[%r,%r]; '
                    'p=mock.patch.object(d.DirectoryTree,"scan",side_effect=MemoryError); '
-                   'p.start(); sys.exit(d.cli())') % (os.path.dirname(SCRIPT), SCRIPT, self.temp)
+                   'p.start(); sys.exit(d.cli())') % (SOURCE_ROOT, SCRIPT, self.temp)
         result = subprocess.run([sys.executable, "-S", "-c", program], stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE)
         self.assertEqual(result.returncode, 1)
@@ -710,7 +716,7 @@ class Fixture(unittest.TestCase):
         self.assertNotIn(b"Traceback", result.stderr)
 
     def test_python35_grammar(self):
-        with open(SCRIPT, "r") as src:
+        with open(IMPLEMENTATION, "r") as src:
             text = src.read()
         if sys.version_info >= (3, 8):
             ast.parse(text, feature_version=(3, 5))

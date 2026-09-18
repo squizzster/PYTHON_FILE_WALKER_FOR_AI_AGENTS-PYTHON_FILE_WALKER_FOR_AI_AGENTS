@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Directory-only JSON tree for Linux, CPython 3.5+.
 
-Usage: create_directory_tree_to_json.py LOCATION
+Usage: python_file_walker_for_ai_agents.py LOCATION
 
 Hidden directories are included. Directory symlinks are leaves. Traversal stays
 on the root filesystem. Sorting follows LC_COLLATE where possible.
@@ -26,7 +26,7 @@ _NOATIME_RETRY = frozenset((errno.EPERM, errno.EINVAL,
 _BROKEN_LINK = frozenset((errno.ENOENT, errno.ENOTDIR, errno.ELOOP))
 HELP_FLAGS = frozenset(("-h", "--help", "-help"))
 HELP_DOCUMENT = {
-    "usage": "create_directory_tree_to_json.py LOCATION",
+    "usage": "python_file_walker_for_ai_agents.py LOCATION",
     "does": "Emits a sorted directory-only JSON tree; includes hidden directories; emits directory symlinks as leaves; stays on the root filesystem; omits other entries.",
     "returns": {"tree": "directory node", "complete": "boolean", "errors": "integer"},
     "nodes": {
