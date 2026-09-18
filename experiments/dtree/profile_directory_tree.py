@@ -30,7 +30,7 @@ def main():
             env["LD_PRELOAD"] = os.path.abspath(args.unknown_library)
         else:
             env.pop("LD_PRELOAD", None)
-        for engine in ("noop", "dtree-default", "dtree-low-io", "listdir-lstat", "os-walk"):
+        for engine in ("noop", "dtree", "listdir-lstat", "os-walk"):
             command = [os.path.abspath(args.helper), "--", sys.executable, "-S", "-B", WORKER,
                        "--worker", engine, args.fixture]
             result = subprocess.run(command, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
@@ -39,7 +39,7 @@ def main():
             summary = json.loads(result.stderr.decode("ascii").splitlines()[-1])
             report[group][engine] = summary
         baseline = report[group]["noop"]["syscalls"]
-        for engine in ("dtree-default", "dtree-low-io", "listdir-lstat", "os-walk"):
+        for engine in ("dtree", "listdir-lstat", "os-walk"):
             rec = report[group][engine]
             observed = rec["syscalls"]
             delta = {name: observed.get(name, {}).get("calls", 0) - baseline.get(name, {}).get("calls", 0)

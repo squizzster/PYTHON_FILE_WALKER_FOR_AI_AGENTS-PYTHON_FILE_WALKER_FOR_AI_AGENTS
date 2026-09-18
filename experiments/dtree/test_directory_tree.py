@@ -93,15 +93,18 @@ class Fixture(unittest.TestCase):
         self.file("file")
         self.mkdir(".hidden/subdir")
         code, doc, err = self.run_scan()
-        self.assertEqual(names(doc["tree"]), ["a", "z"])
-        self.assertEqual(names(doc["tree"]["children"][1]), ["child"])
+        self.assertEqual(names(doc["tree"]), [".hidden", "a", "z"])
+        self.assertEqual(names(doc["tree"]["children"][0]), ["subdir"])
+        self.assertEqual(names(doc["tree"]["children"][2]), ["child"])
         self.assertEqual((code, err), (0, ""))
 
-    def test_all_names(self):
+    def test_hidden_directories_are_included(self):
         self.mkdir(".hidden/child")
         self.mkdir("normal")
-        code, doc, err = self.run_scan(all_names=True)
-        self.assertEqual(names(doc["tree"]), [".hidden", "normal"])
+        os.symlink("normal", os.path.join(self.temp, ".alias"))
+        code, doc, err = self.run_scan()
+        self.assertEqual(doc["tree"]["children"][0]["type"], "link")
+        self.assertEqual(names(doc["tree"]), [".alias", ".hidden", "normal"])
 
     def test_hidden_root_is_still_traversed(self):
         path = self.mkdir(".hidden/child")
@@ -132,18 +135,11 @@ class Fixture(unittest.TestCase):
         self.assertEqual(doc["tree"]["children"][0]["children"][0]["type"], "link")
         self.assertEqual(code, 0)
 
-    def test_no_symlinks_never_calls_readlink(self):
-        self.mkdir("real")
-        os.symlink("real", os.path.join(self.temp, "alias"))
-        with mock.patch.object(dt.os, "readlink", side_effect=AssertionError("readlink forbidden")):
-            code, doc, err = self.run_scan(include_symlinks=False)
-        self.assertEqual(names(doc["tree"]), ["real"])
-
     def test_explicit_root_symlink_is_followed(self):
         self.mkdir("real/child")
         link = os.path.join(self.temp, "alias")
         os.symlink("real", link)
-        code, doc, err = self.run_scan(link, include_symlinks=False)
+        code, doc, err = self.run_scan(link)
         self.assertEqual(names(doc["tree"]), ["child"])
 
     def test_missing_root(self):
@@ -228,27 +224,26 @@ class Fixture(unittest.TestCase):
         code, doc, err = self.run_scan(self.temp + "/")
         self.assertEqual(names(doc["tree"]), ["a"])
 
-    def test_unsorted_matches_directory_enumeration_order(self):
-        for name in ["z", "a", "x", "b", "m"]:
-            self.mkdir(name)
-        expected = [e.name for e in os.scandir(self.temp) if e.is_dir()]
-        code, doc, err = self.run_scan(unsorted=True)
-        self.assertEqual(names(doc["tree"]), expected)
-
     def test_no_location_and_extra_location(self):
         for args in [(), (self.temp, self.temp), ("",)]:
             result = self.cli(*args)
             self.assertEqual(result.returncode, 2)
             self.assertEqual(result.stdout, b"")
+            help_doc = json.loads(result.stderr)
+            self.assertEqual(help_doc["usage"], "create_directory_tree_to_json.py LOCATION")
 
     def test_help(self):
-        result = self.cli("--help")
-        self.assertEqual(result.returncode, 0)
-        self.assertIn(b"LOCATION", result.stdout)
+        for flag in ("-h", "--help", "-help"):
+            result = self.cli(flag)
+            self.assertEqual(result.returncode, 0)
+            self.assertEqual(result.stdout, b"")
+            help_doc = json.loads(result.stderr)
+            self.assertEqual(help_doc["usage"], "create_directory_tree_to_json.py LOCATION")
+            self.assertEqual(set(help_doc["nodes"]), {"directory", "link"})
 
-    def test_dash_location_with_double_dash(self):
+    def test_dash_location_needs_no_option_delimiter(self):
         self.mkdir("-name/child")
-        result = self.cli("--", "-name", cwd=self.temp)
+        result = self.cli("-name", cwd=self.temp)
         self.assertEqual(result.returncode, 0)
         self.assertEqual(names(json.loads(result.stdout)["tree"]), ["child"])
 
@@ -435,7 +430,7 @@ class Fixture(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertEqual(doc["tree"]["children"][0]["error"]["errno"], errno.ELOOP)
 
-    def test_one_file_system_prunes_different_device(self):
+    def test_different_filesystem_is_always_pruned(self):
         self.mkdir("foreign/hidden_child")
         real_fstat = dt.os.fstat
         calls = [0]
@@ -448,7 +443,7 @@ class Fixture(unittest.TestCase):
                 return os.stat_result(values)
             return info
         with mock.patch.object(dt.os, "fstat", side_effect=wrapped):
-            code, doc, err = self.run_scan(one_file_system=True)
+            code, doc, err = self.run_scan()
         self.assertEqual(code, 0)
         self.assertEqual(doc["tree"]["children"][0]["pruned"], "different-filesystem")
         self.assertNotIn("hidden_child", json.dumps(doc))
@@ -556,26 +551,23 @@ class Fixture(unittest.TestCase):
                         pass
                 else:
                     os.symlink(rng.choice(dirs), path)
-            for all_names in (False, True):
-                expected = []
-                stack = [(base, ())]
-                while stack:
-                    path, parent = stack.pop()
-                    for name in sorted(os.listdir(path), reverse=True):
-                        if not all_names and name.startswith("."):
-                            continue
-                        child = os.path.join(path, name)
-                        if os.path.isdir(child):
-                            rel = parent + (name.encode("utf-8"),)
-                            if os.path.islink(child):
-                                expected.append((rel, "link"))
-                            else:
-                                expected.append((rel, "directory"))
-                                stack.append((child, rel))
-                code, doc, err = self.run_scan(base, all_names=all_names)
-                got = [(path[1:], typ) for path, typ in flatten(doc["tree"])[1:]]
-                self.assertEqual(sorted(got), sorted(expected))
-                self.assertEqual(code, 0)
+            expected = []
+            stack = [(base, ())]
+            while stack:
+                path, parent = stack.pop()
+                for name in sorted(os.listdir(path), reverse=True):
+                    child = os.path.join(path, name)
+                    if os.path.isdir(child):
+                        rel = parent + (name.encode("utf-8"),)
+                        if os.path.islink(child):
+                            expected.append((rel, "link"))
+                        else:
+                            expected.append((rel, "directory"))
+                            stack.append((child, rel))
+            code, doc, err = self.run_scan(base)
+            got = [(path[1:], typ) for path, typ in flatten(doc["tree"])[1:]]
+            self.assertEqual(sorted(got), sorted(expected))
+            self.assertEqual(code, 0)
 
     def test_deep_chain_over_pathmax_and_low_fd_limit(self):
         depth = 1400
@@ -696,30 +688,6 @@ class Fixture(unittest.TestCase):
         self.assertEqual(opened, [self.temp, "a"])
         self.assertEqual(code, 0)
 
-    def test_hidden_entries_need_no_type_queries(self):
-        class HiddenEntry(object):
-            name = ".hidden"
-            def is_dir(self, **kwargs):
-                raise AssertionError("hidden metadata touched")
-        with mock.patch.object(dt.os, "scandir", return_value=iter([HiddenEntry()])):
-            code, doc, err = self.run_scan()
-        self.assertEqual(code, 0)
-        self.assertEqual(doc["tree"]["children"], [])
-
-    def test_low_io_mode_never_follows_or_resolves_symlink(self):
-        class LinkEntry(object):
-            name = "alias"
-            def is_dir(self, follow_symlinks=True):
-                if follow_symlinks:
-                    raise AssertionError("symlink target touched")
-                return False
-            def is_symlink(self):
-                raise AssertionError("unneeded symlink query")
-        with mock.patch.object(dt.os, "scandir", return_value=iter([LinkEntry()])):
-            code, doc, err = self.run_scan(include_symlinks=False)
-        self.assertEqual(code, 0)
-        self.assertEqual(doc["tree"]["children"], [])
-
     def test_invalid_names_with_same_display_do_not_collide(self):
         for raw in (b"\xff", b"\xfe", b"\xef\xbf\xbd"):
             os.mkdir(os.fsencode(self.temp) + b"/" + raw)
@@ -740,44 +708,6 @@ class Fixture(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn(b"out of memory", result.stderr)
         self.assertNotIn(b"Traceback", result.stderr)
-
-    def test_reference_gnu_find_selection(self):
-        find = shutil.which("find")
-        if find is None:
-            self.skipTest("find is not installed")
-        self.mkdir("a/b")
-        self.mkdir(".hidden/x")
-        self.mkdir("z")
-        self.file("file")
-        os.symlink("a", os.path.join(self.temp, "alias"))
-        os.symlink("file", os.path.join(self.temp, "filelink"))
-        result = subprocess.run([find, ".", "-mindepth", "1", "-name", ".*", "-prune",
-                                 "-o", "(", "-type", "d", "-o", "-xtype", "d", ")", "-print0"],
-                                cwd=self.temp, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        expected = set(result.stdout.rstrip(b"\x00").split(b"\x00"))
-        code, doc, err = self.run_scan()
-        got = set(b"./" + b"/".join(path[1:]) for path, typ in flatten(doc["tree"])[1:])
-        self.assertEqual(got, expected)
-
-    def test_reference_tree_when_installed(self):
-        tree = shutil.which("tree")
-        if tree is None:
-            self.skipTest("tree is not installed; direct tree comparison not performed")
-        self.mkdir("a/b")
-        self.mkdir("z")
-        self.mkdir(".hidden/x")
-        self.file("file")
-        os.symlink("a", os.path.join(self.temp, "alias"))
-        os.symlink("file", os.path.join(self.temp, "filelink"))
-        os.symlink("missing", os.path.join(self.temp, "broken"))
-        result = subprocess.run([tree, "-d", "-J", "--noreport", self.temp],
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                env=dict(os.environ, LC_ALL="C"))
-        self.assertEqual(result.returncode, 0, result.stderr)
-        reference = json.loads(result.stdout)[0]
-        code, doc, err = self.run_scan()
-        self.assertEqual(flatten(doc["tree"]), flatten(reference))
 
     def test_python35_grammar(self):
         with open(SCRIPT, "r") as src:

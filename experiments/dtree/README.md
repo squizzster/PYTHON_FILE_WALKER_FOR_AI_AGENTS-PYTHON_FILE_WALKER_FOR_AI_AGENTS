@@ -9,41 +9,30 @@ chmod +x create_directory_tree_to_json.py
 ./create_directory_tree_to_json.py ./location > /tmp/dtree.json
 ```
 
-Exactly one location is required. Use `--` before a location beginning with `-`.
-No Python package installation, C compiler, or helper binary is needed to run
-this script. The optional C files are test instruments only.
+Exactly one location is required. There are no behavior switches. A location
+beginning with `-` works directly unless it is exactly `-h`, `--help`, or
+`-help`. Those help forms, and an invocation without a location, emit a compact
+JSON description to stderr. No Python package installation, C compiler, or
+helper binary is needed to run this script. The optional C files are test
+instruments only.
 
-For the lowest-I/O selection, omitting symlinks and avoiding sorting:
+## Traversal semantics
 
-```sh
-python3 create_directory_tree_to_json.py --no-symlinks -U ./location > /tmp/dtree.json
-```
+Hidden, dot-prefixed directories are always included. Children are always
+sorted using `LC_COLLATE`. Ordinary directories are visited once. Directory
+symlinks are reported as leaves with their link text and never recursed into.
+Symlinks to files and broken/cyclic symlinks are omitted. The explicitly
+supplied root may itself be a symlink to a directory.
 
-This deliberately differs from default `tree -d`: symbolic links to directories
-are omitted. `-U` changes order, not membership. It saves sorting work but is
-not a guarantee of better physical disk ordering or fewer directory reads.
-
-Other optional switches: `-a` includes dot directories; `-x` avoids enumerating
-directories whose `st_dev` differs from the root. Use `--help` for usage.
-Default traversal crosses mount points, as `tree -d` does. `-x` is NOT an
-all-mount-boundaries or no-automount guarantee, and symlink target probes in the
-default mode can still reach another filesystem. Combine `-x --no-symlinks` when
-that is appropriate. Choose the starting directory carefully.
-
-## Default semantics
-
-Hidden entries are skipped before type checks. Ordinary directories are visited
-once. Directory symlinks are reported as leaves with their link text, never
-recursed into. Symlinks to files and broken/cyclic symlinks are omitted.
-The explicitly supplied root may itself be a symlink to a directory, including
-when `--no-symlinks` is used; that option concerns entries below the root.
+Traversal stays on the root directory's filesystem. A discovered directory on
+a different `st_dev` is emitted as a pruned leaf and is not enumerated. Symlink
+target probes can still reach another filesystem or trigger an automount, so
+this device boundary is not a filesystem sandbox. Choose the root carefully.
 
 Sorting uses `LC_COLLATE`, with fast byte sorting for C/POSIX/C.UTF-8 locales.
 If names cannot be collated in another locale, that directory falls back to byte
-ordering. Locale-equivalent names need not have the same tie order as `tree`.
-This implements the directory selection and traversal intent of `tree -d`, not
-its text layout, numeric footer, or the precise schema of `tree -J`. A live
-filesystem's race/error output is not promised to match every `tree` version.
+ordering. Locale-equivalent names need not have a stable tie order. The scanner
+defines its own JSON schema and does not invoke an external filesystem walker.
 
 ## JSON schema
 
@@ -64,8 +53,9 @@ presented as an ordinary empty directory. A directory whose enumeration or
 entry classification partly failed has its own numeric `errors` field.
 Errors are also described on STDERR. The top-level `errors` count covers all
 observed traversal errors, and `complete` is false when that count is nonzero.
-A node pruned by `-x` has `pruned: "different-filesystem"`; intentional pruning
-is not an error, and `complete` refers to the selected traversal scope.
+A node outside the root filesystem has `pruned: "different-filesystem"`;
+intentional pruning is not an error, and `complete` refers to the selected
+traversal scope.
 
 Names are Linux bytes, not necessarily UTF-8. Valid UTF-8 is represented in
 `name`/`target`. Otherwise a replacement-character display value is accompanied
@@ -146,9 +136,9 @@ long paths. This resists directory-to-symlink swaps and ancestor renames but
 is not a general filesystem sandbox or a defense against mount manipulation.
 
 One explicit `fstat` of each opened directory provides `(st_dev, st_ino)` for
-ancestor-cycle detection and optional device restriction. `fdopendir` can also
-perform a metadata check. These are deliberate per-directory safety costs;
-this is not a claim of the fewest possible syscalls. Aliases outside the active
+ancestor-cycle detection and root-filesystem restriction. `fdopendir` can also
+perform a metadata check. These are deliberate per-directory safety costs; this
+is not a claim of the fewest possible syscalls. Aliases outside the active
 ancestor chain are not globally deduplicated, which preserves distinct tree
 locations instead of silently dropping them.
 
@@ -217,7 +207,7 @@ engines pay the same worker import overhead. The benchmark compares concrete
 JSON-producing implementations, not theoretical lower bounds for each API.
 A modern `os.walk` already uses `scandir`; it is not a per-file-stat baseline.
 
-Optional Linux x86-64 syscall tracing and real `DT_UNKNOWN` fallback testing:
+Optional Linux x86-64 syscall tracing and real `DT_UNKNOWN` metadata-path testing:
 
 ```sh
 gcc -O2 -Wall -Wextra -o syscall_count syscall_count.c

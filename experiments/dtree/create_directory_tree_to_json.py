@@ -1,17 +1,15 @@
 #!/usr/bin/env python3
-"""Low-I/O, directory-only JSON tree for Linux, CPython 3.5+.
+"""Directory-only JSON tree for Linux, CPython 3.5+.
 
-Usage: create_directory_tree_to_json.py [options] LOCATION
+Usage: create_directory_tree_to_json.py LOCATION
 
-Default selection: tree -d (hidden entries omitted; directory symlinks are
-leaves; mount points traversed). Sorting follows LC_COLLATE where possible.
-Use --no-symlinks -U to avoid symlink-target lookups and sorting.
+Hidden directories are included. Directory symlinks are leaves. Traversal stays
+on the root filesystem. Sorting follows LC_COLLATE where possible.
 
 Exit: 0 = no observed traversal errors; 1 = incomplete/output failure;
       2 = invocation/environment error; 130 = interrupted; 141 = broken pipe.
 A successful scan is a best-effort live listing, NOT a filesystem snapshot.
 """
-import argparse
 import base64
 import errno
 import json
@@ -26,6 +24,16 @@ _FD_SCANDIR = os.scandir in getattr(os, "supports_fd", ()) if hasattr(os, "scand
 _NOATIME_RETRY = frozenset((errno.EPERM, errno.EINVAL,
                             getattr(errno, "EOPNOTSUPP", errno.EINVAL)))
 _BROKEN_LINK = frozenset((errno.ENOENT, errno.ENOTDIR, errno.ELOOP))
+HELP_FLAGS = frozenset(("-h", "--help", "-help"))
+HELP_DOCUMENT = {
+    "usage": "create_directory_tree_to_json.py LOCATION",
+    "does": "Emits a sorted directory-only JSON tree; includes hidden directories; emits directory symlinks as leaves; stays on the root filesystem; omits other entries.",
+    "returns": {"tree": "directory node", "complete": "boolean", "errors": "integer"},
+    "nodes": {
+        "directory": {"type": "directory", "name": "string", "children": "node[]"},
+        "link": {"type": "link", "name": "string", "target": "string"},
+    },
+}
 
 
 def text_fields(key, value):
@@ -93,14 +101,9 @@ class DirectoryTree(object):
     Do not call the legacy backend concurrently with other filesystem work in
     the same process. The command-line program never creates threads.
     """
-    def __init__(self, output, errors, all_names=False, include_symlinks=True,
-                 unsorted=False, one_file_system=False, native_scandir=None):
+    def __init__(self, output, errors, native_scandir=None):
         self.out = BufferedJSON(output)
         self.stderr = errors
-        self.all_names = all_names
-        self.include_symlinks = include_symlinks
-        self.unsorted = unsorted
-        self.one_file_system = one_file_system
         self.native = _FD_SCANDIR if native_scandir is None else native_scandir
         self.error_count = 0
         self.stack = []
@@ -158,12 +161,10 @@ class DirectoryTree(object):
                 os.fchdir(fd)
                 iterator = os.scandir(".")
             for entry in iterator:
-                if not self.all_names and entry.name.startswith("."):
-                    continue
                 try:
                     if entry.is_dir(follow_symlinks=False):
                         pending.append((entry.name, None))
-                    elif self.include_symlinks and entry.is_symlink():
+                    elif entry.is_symlink():
                         try:
                             if entry.is_dir(follow_symlinks=True):
                                 target = os.readlink(entry.name, dir_fd=fd)
@@ -186,18 +187,15 @@ class DirectoryTree(object):
                     close()
                 # CPython 3.5 has no public close(); destruction closes it.
                 del iterator
-        if not self.unsorted:
-            if self.byte_sort:
-                pending.sort(key=lambda item: os.fsencode(item[0]), reverse=True)
-            else:
-                try:
-                    pending.sort(key=lambda item: locale.strxfrm(item[0]), reverse=True)
-                except (UnicodeError, ValueError):
-                    # Invalid bytes may have no locale collation. Preserve all
-                    # names; deterministic byte order for this directory.
-                    pending.sort(key=lambda item: os.fsencode(item[0]), reverse=True)
+        if self.byte_sort:
+            pending.sort(key=lambda item: os.fsencode(item[0]), reverse=True)
         else:
-            pending.reverse()
+            try:
+                pending.sort(key=lambda item: locale.strxfrm(item[0]), reverse=True)
+            except (UnicodeError, ValueError):
+                # Invalid bytes may have no locale collation. Preserve all
+                # names; deterministic byte order for this directory.
+                pending.sort(key=lambda item: os.fsencode(item[0]), reverse=True)
         return pending, local_errors
 
     def close_frame_fd(self, frame):
@@ -222,7 +220,7 @@ class DirectoryTree(object):
                     raise OSError(errno.ELOOP, "directory refers to an active ancestor")
                 if self.root_device is None:
                     self.root_device = info.st_dev
-                elif self.one_file_system and info.st_dev != self.root_device:
+                elif info.st_dev != self.root_device:
                     self.out.write('{"type":"directory",' + text_fields("name", name) +
                                    ',"children":[],"pruned":"different-filesystem"}')
                     return
@@ -298,30 +296,26 @@ class DirectoryTree(object):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__,
-                                     formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("location", help="mandatory directory to inspect")
-    parser.add_argument("-a", "--all", action="store_true", help="include dot directories")
-    parser.add_argument("-U", "--unsorted", action="store_true", help="directory enumeration order")
-    parser.add_argument("--no-symlinks", action="store_true",
-                        help="omit all symlinks; avoid target stat/readlink calls")
-    parser.add_argument("-x", "--one-file-system", action="store_true",
-                        help="do not enumerate directories on a different st_dev")
-    args = parser.parse_args(argv)
+    args = sys.argv[1:] if argv is None else argv
+    if len(args) == 1 and args[0] in HELP_FLAGS:
+        sys.stderr.write(json.dumps(HELP_DOCUMENT, ensure_ascii=True,
+                                    separators=(",", ":")) + "\n")
+        return 0
+    if len(args) != 1 or not args[0] or "\x00" in args[0]:
+        sys.stderr.write(json.dumps(HELP_DOCUMENT, ensure_ascii=True,
+                                    separators=(",", ":")) + "\n")
+        return 2
     if not sys.platform.startswith("linux") or sys.version_info < (3, 5):
-        parser.error("requires Linux and CPython/Python 3.5 or newer")
-    if not args.location or "\x00" in args.location:
-        parser.error("location must be nonempty and cannot contain NUL")
+        sys.stderr.write("dtree: requires Linux and CPython/Python 3.5 or newer\n")
+        return 2
     try:
         locale.setlocale(locale.LC_COLLATE, "")
     except locale.Error:
         # No filesystem operation: invalid environment locale falls back to C.
         locale.setlocale(locale.LC_COLLATE, "C")
     output = sys.stdout.buffer
-    scanner = DirectoryTree(output, sys.stderr, all_names=args.all,
-                            include_symlinks=not args.no_symlinks,
-                            unsorted=args.unsorted, one_file_system=args.one_file_system)
-    status = scanner.run(args.location)
+    scanner = DirectoryTree(output, sys.stderr)
+    status = scanner.run(args[0])
     output.flush()  # Catch delayed ENOSPC/EPIPE before claiming success.
     return status
 

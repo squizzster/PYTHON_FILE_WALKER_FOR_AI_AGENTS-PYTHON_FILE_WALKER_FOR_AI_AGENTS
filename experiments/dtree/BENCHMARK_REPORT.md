@@ -1,20 +1,22 @@
 # Test and benchmark report
 
-Recorded in this session on 18 September 2026. These are measured results,
-not projected disk performance or exhaustive hardware certification.
+Performance measurements were recorded in the imported source session on
+18 September 2026. The public traversal interface was subsequently simplified
+to one fixed behavior. The fixtures had no hidden entries, symlinks, or
+cross-filesystem directories, so the retained Dtree measurements still exercise
+the same traversal path. They were not rerun after the interface change.
 
 ## Test outcome
 
-Final normal run: **59 tests run, 58 passed, 1 skipped**, 9.429 seconds.
-Final forced-DT_UNKNOWN run: **59 tests run, 58 passed, 1 skipped**, 9.549 seconds.
+Current normal run: **53 tests run, 53 passed**.
+Current forced-DT_UNKNOWN run: **53 tests run, 53 passed**.
 The forced run used LD_PRELOAD to overwrite the d_type returned by libc
 readdir/readdir64 with DT_UNKNOWN, exercising CPython's actual metadata fallback,
 not merely replacing DirEntry.is_dir with a mock.
 
-The skipped test in both runs was the direct `tree -d -J` comparison: `tree`
-was not installed, and downloading it was unavailable. A GNU find selection
-comparison passed. Sixteen seeded randomized filesystem trees, each scanned
-with and without hidden entries, matched an independent listdir/stat reference.
+The suite invokes no external filesystem walker. Sixteen seeded randomized
+filesystem trees including hidden entries matched an independent Python
+listdir/stat reference.
 
 Coverage includes normal and hidden directories; symlink directory leaves,
 file links, broken links and loops; arbitrary non-UTF-8 bytes and byte-distinct
@@ -36,10 +38,9 @@ passed under CPython 3.13.5. Real older interpreter binaries were unavailable.
 Device-boundary/ancestor-cycle failures were injected; privileged mount-race
 and actual bind-cycle tests were not performed.
 
-All four benchmark producers were additionally compared on all six measured
-filesystem/fixture combinations: **24 outputs validated**, equal after sibling
-sorting. The fixtures contain no symlinks, so low-I/O selection is equivalent
-on these fixtures. See results/benchmark-output-validation.json.
+The Dtree producer and two Python baselines were compared on all six measured
+filesystem/fixture combinations: **18 relevant outputs validated**, equal after
+sibling sorting.
 
 ## Environment and method
 
@@ -75,19 +76,19 @@ All engines import the same benchmark harness before their worker timer starts.
 
 ### Container overlay
 
-| Fixture | Dtree default | Dtree low-I/O | listdir + lstat | os.walk |
-| --- | ---: | ---: | ---: | ---: |
-| file-heavy | 35.69 ms | 32.02 ms | 293.85 ms | 35.10 ms |
-| mixed | 29.24 ms | 28.70 ms | 132.03 ms | 35.20 ms |
-| directory-heavy | 86.42 ms | 85.11 ms | 87.43 ms | 110.76 ms |
+| Fixture | Dtree | listdir + lstat | os.walk |
+| --- | ---: | ---: | ---: |
+| file-heavy | 35.69 ms | 293.85 ms | 35.10 ms |
+| mixed | 29.24 ms | 132.03 ms | 35.20 ms |
+| directory-heavy | 86.42 ms | 87.43 ms | 110.76 ms |
 
 ### tmpfs
 
-| Fixture | Dtree default | Dtree low-I/O | listdir + lstat | os.walk |
-| --- | ---: | ---: | ---: | ---: |
-| file-heavy | 22.87 ms | 21.67 ms | 184.32 ms | 23.37 ms |
-| mixed | 25.50 ms | 21.81 ms | 90.57 ms | 33.02 ms |
-| directory-heavy | 59.35 ms | 55.48 ms | 51.42 ms | 76.41 ms |
+| Fixture | Dtree | listdir + lstat | os.walk |
+| --- | ---: | ---: | ---: |
+| file-heavy | 22.87 ms | 184.32 ms | 23.37 ms |
+| mixed | 25.50 ms | 90.57 ms | 33.02 ms |
+| directory-heavy | 59.35 ms | 51.42 ms | 76.41 ms |
 
 ## Median fresh-process benchmark-worker elapsed time
 
@@ -96,32 +97,29 @@ not timings of the standalone script's smaller CLI/import path.
 
 ### Container overlay
 
-| Fixture | Dtree default | Dtree low-I/O | listdir + lstat | os.walk |
-| --- | ---: | ---: | ---: | ---: |
-| file-heavy | 71.28 ms | 67.50 ms | 327.59 ms | 69.70 ms |
-| mixed | 64.30 ms | 61.22 ms | 166.38 ms | 69.26 ms |
-| directory-heavy | 120.17 ms | 117.48 ms | 128.92 ms | 148.39 ms |
+| Fixture | Dtree | listdir + lstat | os.walk |
+| --- | ---: | ---: | ---: |
+| file-heavy | 71.28 ms | 327.59 ms | 69.70 ms |
+| mixed | 64.30 ms | 166.38 ms | 69.26 ms |
+| directory-heavy | 120.17 ms | 128.92 ms | 148.39 ms |
 
 ### tmpfs
 
-| Fixture | Dtree default | Dtree low-I/O | listdir + lstat | os.walk |
-| --- | ---: | ---: | ---: | ---: |
-| file-heavy | 55.67 ms | 59.81 ms | 219.79 ms | 57.09 ms |
-| mixed | 64.86 ms | 61.20 ms | 127.27 ms | 70.92 ms |
-| directory-heavy | 93.09 ms | 87.83 ms | 84.70 ms | 110.10 ms |
+| Fixture | Dtree | listdir + lstat | os.walk |
+| --- | ---: | ---: | ---: |
+| file-heavy | 55.67 ms | 219.79 ms | 57.09 ms |
+| mixed | 64.86 ms | 127.27 ms | 70.92 ms |
+| directory-heavy | 93.09 ms | 84.70 ms | 110.10 ms |
 
 ## Interpretation
 
 The largest improvement is over per-file lstat in file-heavy directories.
 The modern os.walk baseline is already competitive: on the file-heavy overlay
-fixture, its scan/JSON time was slightly below Dtree default. On directory-heavy
-tmpfs, listdir+lstat was faster than either Dtree mode. The evidence does not
+fixture, its scan/JSON time was slightly below Dtree. On directory-heavy
+tmpfs, listdir+lstat was faster than Dtree. The evidence does not
 support a claim that Dtree is universally the fastest possible Python walker.
 
-Default vs low-I/O timing differences on these link-free fixtures are primarily
-CPU/sorting effects and noise, not avoided file metadata reads. With links,
-low-I/O additionally avoids target probes and readlink. Directory order does
-not necessarily equal physical media order.
+Directory order does not necessarily equal physical media order.
 
 For 10,201 directories, median process high-water RSS was approximately
 10.6 MiB (tmpfs Dtree) / 11.9 MiB (overlay Dtree) versus 14.5 MiB for the two
@@ -137,8 +135,7 @@ symlinks in this fixture. Per-directory safety costs are intentionally included.
 
 | Engine | Metadata, normal d_type | Metadata, forced DT_UNKNOWN | getdents64 | openat |
 | --- | ---: | ---: | ---: | ---: |
-| Dtree default | 402 | 100,602 | 402 | 201 |
-| Dtree low-I/O | 402 | 100,602 | 402 | 201 |
+| Dtree | 402 | 100,602 | 402 | 201 |
 | listdir+lstat | 100,401 | 100,401 | 402 | 201 |
 | os.walk builder | 601 | 100,801 | 402 | 201 |
 
@@ -161,16 +158,16 @@ There is no proof here of a global I/O minimum or universal fastest execution.
 
 ## Reproduction and provenance
 
-See README.md for commands and safety notes. Raw results, both final test logs,
-and output-validation records are in results/. C helpers are optional test
-source code only and are not dependencies of the production Python script.
+See README.md for commands and safety notes. The imported option-specific raw
+results were removed when the interface became fixed. C helpers are optional
+test source code only and are not dependencies of the production Python script.
 
 SHA-256 of the delivered production script:
 
 ```text
-ea71c5c85e2ec83810814a2e9af98d1c13bc15fa6366ca57f5f2c2fbdf69272c
+031920dda291a54f9f90c11a7419789a477df799f2c70ece57e31d6a2ce305fa
 ```
 
-The final CLI failure-reporting cleanup changed only the outer CLI error
-handler after the tmpfs timing run; the benchmark uses the unchanged traversal
-class directly. All final tests and output validation used the delivered code.
+Current correctness checks use the fixed traversal contract described in the
+README. The retained timings are historical evidence with the limitation stated
+at the start of this report.

@@ -6,11 +6,11 @@ Python file traversal tooling for AI agents.
 changes, run representative cases, and adapt to observed behavior.
 
 **State:** initialized Python 3.12 project with the Modular Vertical Architecture
-(MVA) v0.3.0 baseline. A supplied Linux directory-tree implementation and its
-original tests, benchmarks, recorded results, and checksum manifest are preserved
-under [`experiments/dtree/`](experiments/dtree/README.md) for evaluation. The
-installed command still prints a starter greeting; the candidate has not yet been
-promoted into the package's public CLI.
+(MVA) v0.3.0 baseline. An imported Linux directory-tree implementation and its
+native test suite, benchmarks, recorded results, and checksum manifest live under
+[`experiments/dtree/`](experiments/dtree/README.md) for evaluation. The installed
+command still prints a starter greeting; the candidate has not yet been promoted
+into the package's public CLI.
 
 ## Run the scaffold
 
@@ -23,10 +23,12 @@ The package lives in `src/python_file_walker_for_ai_agents/`.
 
 ## Candidate implementation
 
-The `experiments/dtree/` bundle is preserved in its original layout so its
-`SHA256SUMS` file remains useful and its reproduction commands continue to work.
-It targets Linux, uses only the Python standard library at runtime, and emits a
-streamed directory-only JSON tree. See the experiment's
+The `experiments/dtree/` bundle retains its imported layout so its `SHA256SUMS`
+file and reproduction commands remain useful. It targets Linux, invokes no
+external filesystem walker, uses only the Python standard library at runtime,
+and emits a streamed directory-only JSON tree. Hidden directories are always
+included, children are sorted, directory symlinks are leaves, and traversal
+stays on the root filesystem. See the experiment's
 [README](experiments/dtree/README.md) and
 [benchmark report](experiments/dtree/BENCHMARK_REPORT.md).
 

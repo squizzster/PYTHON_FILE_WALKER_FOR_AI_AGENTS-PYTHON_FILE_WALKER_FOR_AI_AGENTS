@@ -27,7 +27,7 @@ import time
 import create_directory_tree_to_json as dt
 
 SCRIPT = os.path.abspath(__file__)
-ENGINES = ("dtree-default", "dtree-low-io", "listdir-lstat", "os-walk")
+ENGINES = ("dtree", "listdir-lstat", "os-walk")
 
 
 def node(name):
@@ -41,8 +41,6 @@ def listdir_tree(root):
         path, parent = todo.pop()
         children = []
         for name in os.listdir(path):
-            if name.startswith("."):
-                continue
             full = os.path.join(path, name)
             mode = os.lstat(full).st_mode
             if stat.S_ISDIR(mode):
@@ -60,7 +58,7 @@ def walk_tree(root):
     result = node(root)
     index = {root: result}
     for path, dirs, files in os.walk(root, followlinks=False):
-        dirs[:] = sorted(name for name in dirs if not name.startswith("."))
+        dirs[:] = sorted(dirs)
         parent = index.pop(path)
         for name in dirs:
             full = os.path.join(path, name)
@@ -77,10 +75,8 @@ def worker(engine, root):
     locale.setlocale(locale.LC_COLLATE, "C")
     start = time.perf_counter()
     status = 0
-    if engine.startswith("dtree-"):
-        scanner = dt.DirectoryTree(sys.stdout.buffer, sys.stderr,
-                                   include_symlinks=engine != "dtree-low-io",
-                                   unsorted=engine == "dtree-low-io")
+    if engine == "dtree":
+        scanner = dt.DirectoryTree(sys.stdout.buffer, sys.stderr)
         status = scanner.run(root)
     elif engine == "noop":
         pass
