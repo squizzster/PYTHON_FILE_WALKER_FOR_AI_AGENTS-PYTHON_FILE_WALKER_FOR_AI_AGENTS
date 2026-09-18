@@ -6,8 +6,11 @@ Python file traversal tooling for AI agents.
 changes, run representative cases, and adapt to observed behavior.
 
 **State:** initialized Python 3.12 project with the Modular Vertical Architecture
-(MVA) v0.3.0 baseline. The installed command currently prints a starter greeting.
-File-walking behavior and its first experiment are still to be defined.
+(MVA) v0.3.0 baseline. A supplied Linux directory-tree implementation and its
+original tests, benchmarks, recorded results, and checksum manifest are preserved
+under [`experiments/dtree/`](experiments/dtree/README.md) for evaluation. The
+installed command still prints a starter greeting; the candidate has not yet been
+promoted into the package's public CLI.
 
 ## Run the scaffold
 
@@ -17,6 +20,15 @@ uv run --locked python-file-walker-for-ai-agents
 ```
 
 The package lives in `src/python_file_walker_for_ai_agents/`.
+
+## Candidate implementation
+
+The `experiments/dtree/` bundle is preserved in its original layout so its
+`SHA256SUMS` file remains useful and its reproduction commands continue to work.
+It targets Linux, uses only the Python standard library at runtime, and emits a
+streamed directory-only JSON tree. See the experiment's
+[README](experiments/dtree/README.md) and
+[benchmark report](experiments/dtree/BENCHMARK_REPORT.md).
 
 ## Architecture
 

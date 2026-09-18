@@ -1,0 +1,146 @@
+[
+  {
+    "filesystem": "tmpfs",
+    "fixture": "directory-heavy",
+    "engine": "dtree-default",
+    "equal_after_sibling_sort": true
+  },
+  {
+    "filesystem": "tmpfs",
+    "fixture": "directory-heavy",
+    "engine": "dtree-low-io",
+    "equal_after_sibling_sort": true
+  },
+  {
+    "filesystem": "tmpfs",
+    "fixture": "directory-heavy",
+    "engine": "listdir-lstat",
+    "equal_after_sibling_sort": true
+  },
+  {
+    "filesystem": "tmpfs",
+    "fixture": "directory-heavy",
+    "engine": "os-walk",
+    "equal_after_sibling_sort": true
+  },
+  {
+    "filesystem": "tmpfs",
+    "fixture": "file-heavy",
+    "engine": "dtree-default",
+    "equal_after_sibling_sort": true
+  },
+  {
+    "filesystem": "tmpfs",
+    "fixture": "file-heavy",
+    "engine": "dtree-low-io",
+    "equal_after_sibling_sort": true
+  },
+  {
+    "filesystem": "tmpfs",
+    "fixture": "file-heavy",
+    "engine": "listdir-lstat",
+    "equal_after_sibling_sort": true
+  },
+  {
+    "filesystem": "tmpfs",
+    "fixture": "file-heavy",
+    "engine": "os-walk",
+    "equal_after_sibling_sort": true
+  },
+  {
+    "filesystem": "tmpfs",
+    "fixture": "mixed",
+    "engine": "dtree-default",
+    "equal_after_sibling_sort": true
+  },
+  {
+    "filesystem": "tmpfs",
+    "fixture": "mixed",
+    "engine": "dtree-low-io",
+    "equal_after_sibling_sort": true
+  },
+  {
+    "filesystem": "tmpfs",
+    "fixture": "mixed",
+    "engine": "listdir-lstat",
+    "equal_after_sibling_sort": true
+  },
+  {
+    "filesystem": "tmpfs",
+    "fixture": "mixed",
+    "engine": "os-walk",
+    "equal_after_sibling_sort": true
+  },
+  {
+    "filesystem": "overlay",
+    "fixture": "directory-heavy",
+    "engine": "dtree-default",
+    "equal_after_sibling_sort": true
+  },
+  {
+    "filesystem": "overlay",
+    "fixture": "directory-heavy",
+    "engine": "dtree-low-io",
+    "equal_after_sibling_sort": true
+  },
+  {
+    "filesystem": "overlay",
+    "fixture": "directory-heavy",
+    "engine": "listdir-lstat",
+    "equal_after_sibling_sort": true
+  },
+  {
+    "filesystem": "overlay",
+    "fixture": "directory-heavy",
+    "engine": "os-walk",
+    "equal_after_sibling_sort": true
+  },
+  {
+    "filesystem": "overlay",
+    "fixture": "file-heavy",
+    "engine": "dtree-default",
+    "equal_after_sibling_sort": true
+  },
+  {
+    "filesystem": "overlay",
+    "fixture": "file-heavy",
+    "engine": "dtree-low-io",
+    "equal_after_sibling_sort": true
+  },
+  {
+    "filesystem": "overlay",
+    "fixture": "file-heavy",
+    "engine": "listdir-lstat",
+    "equal_after_sibling_sort": true
+  },
+  {
+    "filesystem": "overlay",
+    "fixture": "file-heavy",
+    "engine": "os-walk",
+    "equal_after_sibling_sort": true
+  },
+  {
+    "filesystem": "overlay",
+    "fixture": "mixed",
+    "engine": "dtree-default",
+    "equal_after_sibling_sort": true
+  },
+  {
+    "filesystem": "overlay",
+    "fixture": "mixed",
+    "engine": "dtree-low-io",
+    "equal_after_sibling_sort": true
+  },
+  {
+    "filesystem": "overlay",
+    "fixture": "mixed",
+    "engine": "listdir-lstat",
+    "equal_after_sibling_sort": true
+  },
+  {
+    "filesystem": "overlay",
+    "fixture": "mixed",
+    "engine": "os-walk",
+    "equal_after_sibling_sort": true
+  }
+]
