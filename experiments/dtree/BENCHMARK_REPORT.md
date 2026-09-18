@@ -15,9 +15,11 @@ python_site_initialization: disabled
 
 | Check | Result |
 | --- | ---: |
-| Native unittest suite | 52 passed |
+| Native unittest suite, Python 3.12 | 53 passed |
+| Path-backend unittest suite, Python 3.5 | 53 run, 1 skipped |
 | Forced `DT_UNKNOWN` suite | 52 passed |
-| Relocatable shim suite | 3 passed |
+| Relocatable shim suite, Python 3.12 | 5 passed |
+| Installed-wheel shim suite, Python 3.5 | 5 passed |
 | Architecture validation | 0 errors, 0 advisories |
 
 Both optional C helpers compile with `gcc -O2 -Wall -Wextra`. The test suite

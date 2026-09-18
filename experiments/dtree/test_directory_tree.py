@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Run: python3 -m unittest -v test_directory_tree
 
-Only temporary test fixtures are changed. Linux and Python 3.12+.
+Only temporary test fixtures are changed. Linux and Python 3.5+.
 Optional LD_PRELOAD helper is built separately for the DT_UNKNOWN tests.
 """
+import ast
 import base64
 import errno
 import io
@@ -34,6 +35,10 @@ SCRIPT = os.path.join(PROJECT_ROOT, "python_file_walker_for_ai_agents.py")
 
 def names(node):
     return [child["name"] for child in node["children"]]
+
+
+def load_json_bytes(data):
+    return json.loads(data.decode("ascii"))
 
 
 def decode_name(node, key="name"):
@@ -163,7 +168,7 @@ class Fixture(unittest.TestCase):
         os.mkfifo(fifo)
         result = self.cli(fifo, timeout=5)
         self.assertEqual(result.returncode, 1)
-        self.assertEqual(json.loads(result.stdout)["tree"]["error"]["errno"], errno.ENOTDIR)
+        self.assertEqual(load_json_bytes(result.stdout)["tree"]["error"]["errno"], errno.ENOTDIR)
 
     def test_fifo_and_socket_entries_omitted(self):
         os.mkfifo(os.path.join(self.temp, "fifo"))
@@ -207,7 +212,7 @@ class Fixture(unittest.TestCase):
         env = dict(os.environ, LC_ALL="C", PYTHONIOENCODING="ascii:strict")
         result = self.cli(self.temp, env=env)
         self.assertEqual(result.returncode, 0)
-        self.assertEqual(names(json.loads(result.stdout)["tree"]), ["\u96ea"])
+        self.assertEqual(names(load_json_bytes(result.stdout)["tree"]), ["\u96ea"])
 
     def test_invalid_environment_locale_falls_back(self):
         self.mkdir("a")
@@ -233,7 +238,7 @@ class Fixture(unittest.TestCase):
             result = self.cli(*args)
             self.assertEqual(result.returncode, 2)
             self.assertEqual(result.stdout, b"")
-            help_doc = json.loads(result.stderr)
+            help_doc = load_json_bytes(result.stderr)
             self.assertEqual(help_doc["usage"], "python_file_walker_for_ai_agents.py LOCATION")
 
     def test_help(self):
@@ -241,7 +246,7 @@ class Fixture(unittest.TestCase):
             result = self.cli(flag)
             self.assertEqual(result.returncode, 0)
             self.assertEqual(result.stdout, b"")
-            help_doc = json.loads(result.stderr)
+            help_doc = load_json_bytes(result.stderr)
             self.assertEqual(help_doc["usage"], "python_file_walker_for_ai_agents.py LOCATION")
             self.assertEqual(set(help_doc["nodes"]), {"directory", "link"})
 
@@ -249,7 +254,7 @@ class Fixture(unittest.TestCase):
         self.mkdir("-name/child")
         result = self.cli("-name", cwd=self.temp)
         self.assertEqual(result.returncode, 0)
-        self.assertEqual(names(json.loads(result.stdout)["tree"]), ["child"])
+        self.assertEqual(names(load_json_bytes(result.stdout)["tree"]), ["child"])
 
     def test_legacy_backend_same_output_restores_cwd(self):
         self.mkdir("a/b")
@@ -296,14 +301,21 @@ class Fixture(unittest.TestCase):
         self.assertEqual(code, 0)
 
     def test_no_retry_on_media_error(self):
-        with mock.patch.object(dt.os, "open", side_effect=OSError(errno.EIO, "media error")) as op:
+        real_open = dt.os.open
+        attempted = []
+        def wrapped(path, flags, **kwargs):
+            if path == ".":
+                return real_open(path, flags, **kwargs)
+            attempted.append(path)
+            raise OSError(errno.EIO, "media error")
+        with mock.patch.object(dt.os, "open", side_effect=wrapped):
             code, doc, err = self.run_scan()
         self.assertEqual(code, 1)
-        self.assertEqual(op.call_count, 1)
+        self.assertEqual(attempted, [self.temp])
 
     def test_native_noatime_preserves_directory_atime(self):
-        if not getattr(os, "O_NOATIME", 0):
-            self.skipTest("O_NOATIME unavailable")
+        if not getattr(os, "O_NOATIME", 0) or not dt._FD_SCANDIR:
+            self.skipTest("native fd scandir with O_NOATIME unavailable")
         self.mkdir("a")
         past = 946684800
         for path in (self.temp, os.path.join(self.temp, "a")):
@@ -382,7 +394,9 @@ class Fixture(unittest.TestCase):
                 self.once = True
                 return next(self.it)
             def close(self):
-                self.it.close()
+                close = getattr(self.it, "close", None)
+                if close is not None:
+                    close()
         used = [False]
         def wrapped(fd):
             if not used[0]:
@@ -595,7 +609,7 @@ class Fixture(unittest.TestCase):
             old = sys.getrecursionlimit()
             try:
                 sys.setrecursionlimit(10000)
-                doc = json.loads(result.stdout)
+                doc = load_json_bytes(result.stdout)
             finally:
                 sys.setrecursionlimit(old)
             count, node = 0, doc["tree"]
@@ -644,7 +658,7 @@ class Fixture(unittest.TestCase):
         try:
             result = self.cli(self.temp, preexec_fn=drop_privileges)
             self.assertEqual(result.returncode, 1, result.stderr)
-            doc = json.loads(result.stdout)
+            doc = load_json_bytes(result.stdout)
             self.assertFalse(doc["complete"])
             self.assertEqual(names(doc["tree"]), ["blocked", "readable"])
         finally:
@@ -667,10 +681,11 @@ class Fixture(unittest.TestCase):
         self.file("file")
         real_scan = dt.os.scandir
         seen = []
-        def wrapped(fd):
-            info = os.fstat(fd)
+        def wrapped(location):
+            info = (os.fstat(location) if isinstance(location, int)
+                    else os.stat(location))
             seen.append((info.st_dev, info.st_ino))
-            return real_scan(fd)
+            return real_scan(location)
         with mock.patch.object(dt.os, "scandir", side_effect=wrapped):
             code, doc, err = self.run_scan()
         self.assertEqual(code, 0)
@@ -689,7 +704,8 @@ class Fixture(unittest.TestCase):
             return real_open(path, flags, **kwargs)
         with mock.patch.object(dt.os, "open", side_effect=wrapped):
             code, doc, err = self.run_scan()
-        self.assertEqual(opened, [self.temp, "a"])
+        expected = [self.temp, "a"] if dt._FD_SCANDIR else [".", self.temp, "a"]
+        self.assertEqual(opened, expected)
         self.assertEqual(code, 0)
 
     def test_invalid_names_with_same_display_do_not_collide(self):
@@ -712,6 +728,20 @@ class Fixture(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn(b"out of memory", result.stderr)
         self.assertNotIn(b"Traceback", result.stderr)
+
+    def test_python35_grammar(self):
+        paths = (SCRIPT,
+                 os.path.join(SOURCE_ROOT, "python_file_walker_for_ai_agents",
+                              "directory_tree.py"),
+                 os.path.join(SOURCE_ROOT, "python_file_walker_for_ai_agents",
+                              "__init__.py"))
+        for path in paths:
+            with open(path, "r") as source:
+                text = source.read()
+            if sys.version_info >= (3, 8):
+                ast.parse(text, filename=path, feature_version=(3, 5))
+            else:
+                ast.parse(text, filename=path)
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

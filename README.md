@@ -4,7 +4,8 @@ Linux directory-tree JSON streamer for AI-agent tooling.
 
 ```text
 mode: EXP
-python: >=3.12
+runtime_python: >=3.5
+development_python: 3.12
 runtime_dependencies: []
 platform: Linux
 implementation: src/python_file_walker_for_ai_agents/directory_tree.py

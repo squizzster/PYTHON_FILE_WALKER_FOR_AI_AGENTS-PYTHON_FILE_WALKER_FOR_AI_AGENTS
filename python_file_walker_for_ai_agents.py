@@ -25,8 +25,8 @@ def main():
     _prepare_import_path()
     try:
         from python_file_walker_for_ai_agents.directory_tree import cli
-    except ModuleNotFoundError as exc:
-        if exc.name != PACKAGE_NAME:
+    except ImportError as exc:
+        if getattr(exc, "name", None) != PACKAGE_NAME:
             raise
         sys.stderr.write("python_file_walker_for_ai_agents package is not installed\n")
         return 2
