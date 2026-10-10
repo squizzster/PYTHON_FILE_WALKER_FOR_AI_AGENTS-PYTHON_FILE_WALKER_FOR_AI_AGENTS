@@ -12,12 +12,13 @@ SHIM = os.path.join(PROJECT_ROOT, "python_file_walker_for_ai_agents.py")
 SOURCE_ROOT = os.path.join(PROJECT_ROOT, "src")
 sys.path.insert(0, SOURCE_ROOT)
 
-from python_file_walker_for_ai_agents import directory_tree
+from python_file_walker_for_ai_agents import directory_tree, file_listing
 
 
 class RelocatableShimTests(unittest.TestCase):
     def test_python35_is_the_runtime_and_package_minimum(self):
         self.assertEqual(directory_tree.MINIMUM_PYTHON, (3, 5))
+        self.assertEqual(file_listing.MINIMUM_PYTHON, (3, 5))
         with open(os.path.join(PROJECT_ROOT, "pyproject.toml"), "r") as source:
             metadata = source.read()
         self.assertIn('requires-python = ">=3.5"', metadata)

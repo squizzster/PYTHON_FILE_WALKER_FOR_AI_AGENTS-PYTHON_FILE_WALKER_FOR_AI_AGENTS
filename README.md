@@ -1,68 +1,41 @@
-# PYTHON_FILE_WALKER_FOR_AI_AGENTS
+# Python File Walker for AI Agents
 
-Linux directory-tree JSON streamer for AI-agent tooling.
+Python File Walker for AI Agents turns Linux directory contents into compact,
+machine-readable JSON. Its three command-line interfaces cover a sorted
+directory-only tree, a one-directory file listing, and a recursive tree
+that attaches files to every directory. This gives agents and automation a
+predictable inventory without parsing human-oriented shell output.
 
-```text
-mode: EXP
-runtime_python: >=3.5
-development_python: 3.12
-runtime_dependencies: []
-platform: Linux
-implementation: src/python_file_walker_for_ai_agents/directory_tree.py
-shim: python_file_walker_for_ai_agents.py
-```
+The walkers never open or read file contents. Recursive traversal scans each
+real directory once, includes hidden entries, treats descendant directory
+symlinks as leaves, and stays on the root directory's filesystem. Streaming
+encoders and bounded internal batches avoid building the complete JSON result in
+walker memory, while explicit completion and error fields let consumers detect
+partial results.
 
-## Contract
+The runtime uses only the Python standard library. It requires **Linux and
+Python 3.5 or newer**. The current package version is `0.1.0`, and development
+mode is **EXP**: behavior is evidence-led and interfaces may still change.
 
-- Input: exactly one directory location.
-- Hidden directories: included.
-- Ordering: sorted using `LC_COLLATE`; byte order in C/POSIX locales.
-- Directory symlinks: emitted as leaf nodes; never traversed.
-- Other symlinks and non-directories: omitted.
-- Filesystem boundary: directories with a different `st_dev` are emitted as
-  pruned leaves and not enumerated.
-- Output: one compact JSON document plus newline on stdout.
-- Runtime: Python standard library only; no external filesystem walker.
+## Documentation
 
-## Run
+### Use the tools
 
-```bash
-./python_file_walker_for_ai_agents.py LOCATION
-uv run --locked python-file-walker-for-ai-agents LOCATION
-```
+- [CLI reference](docs/CLI_REFERENCE.md) — commands, options, JSON contracts,
+  ordering, filesystem boundaries, exit statuses, and safe consumption.
+- [Version tracker](VERSION_TRACKER.md) — pending changes and dated `0.1.0`
+  history.
 
-`-h`, `--help`, `-help`, or no location emits the compact JSON contract to
-stderr. Explicit help exits `0`; a missing or invalid argument count exits `2`.
+### Develop and maintain
 
-The executable shim works from any current directory. A symlink resolves the
-adjacent source package. A copied shim, including one placed in `/usr/local/bin`,
-imports `python_file_walker_for_ai_agents` from the Python interpreter selected
-by `/usr/bin/env python3`; install the package into that interpreter first.
+- [Development guide](docs/DEVELOPMENT.md) — authoritative source map,
+  repository layout, verification workflow, experiments, and known gaps.
+- [Agent instructions](AGENTS.md) — project-specific constraints and completion
+  requirements for automated contributors.
 
-## Output
+### Verification evidence
 
-```json
-{"tree":{"type":"directory","name":"LOCATION","children":[{"type":"directory","name":"NAME","children":[]},{"type":"link","name":"NAME","target":"TARGET"}]},"complete":true,"errors":0}
-```
-
-Invalid filename bytes add authoritative `name_bytes_b64` or
-`target_bytes_b64`. Failed directory nodes add `error`. Cross-filesystem nodes
-add `"pruned":"different-filesystem"`.
-
-| Exit | Meaning |
-| ---: | --- |
-| 0 | Complete selected traversal and successful output flush. |
-| 1 | Partial traversal, root failure, output failure, or memory failure. |
-| 2 | Invalid invocation or unsupported runtime. |
-| 130 | Interrupted. |
-| 141 | Broken pipe. |
-
-## Verify
-
-```bash
-uv sync --locked
-uv run --locked python -m unittest -q tests/test_relocatable_shim.py
-(cd experiments/dtree && uv run --locked python -m unittest -q test_directory_tree.py)
-```
-
-Benchmark and low-level verification assets are in `experiments/dtree/`.
+- [Directory-tree verification assets](experiments/dtree/README.md) — focused
+  tests, benchmarks, and optional Linux instrumentation.
+- [Directory-tree verification snapshot](experiments/dtree/BENCHMARK_REPORT.md)
+  — dated correctness and warm-cache benchmark results.

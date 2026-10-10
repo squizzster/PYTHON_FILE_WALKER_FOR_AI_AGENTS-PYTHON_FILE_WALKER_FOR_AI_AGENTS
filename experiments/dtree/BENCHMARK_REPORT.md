@@ -1,4 +1,9 @@
-# Current verification report
+# Directory-tree verification snapshot — 2026-09-18
+
+This is point-in-time evidence for the directory-only traversal core in the
+environment below. It is not a claim about later commits or the separate file
+listing contracts. See the [verification assets](README.md) for reproduction
+commands and hazards.
 
 ```text
 date_utc: 2026-09-18
