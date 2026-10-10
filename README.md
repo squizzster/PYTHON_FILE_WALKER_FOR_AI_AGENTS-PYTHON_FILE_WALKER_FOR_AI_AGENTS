@@ -39,3 +39,5 @@ mode is **EXP**: behavior is evidence-led and interfaces may still change.
   tests, benchmarks, and optional Linux instrumentation.
 - [Directory-tree verification snapshot](experiments/dtree/BENCHMARK_REPORT.md)
   — dated correctness and warm-cache benchmark results.
+- [Operational traversal statistics](PERFORMANCE.md) — first-observed and
+  warm-cache timings, plus directory-only versus all-entry-count observations.
