@@ -1,7 +1,10 @@
-# Dtree verification assets
+# Directory-tree verification assets
 
 Tests and synthetic benchmarks for
-`src/python_file_walker_for_ai_agents/directory_tree.py`.
+[`DirectoryTree`](../../src/python_file_walker_for_ai_agents/directory_tree.py),
+the directory-only traversal core. These assets do not cover the file-object
+options; see the project [test map](../../docs/DEVELOPMENT.md#test-ownership) for
+those suites.
 
 ```text
 external_walker_dependencies: []
